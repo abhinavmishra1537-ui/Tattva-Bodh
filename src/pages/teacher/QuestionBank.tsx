@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Library, Pencil, Plus } from "lucide-react";
+import { CheckCircle2, CircleCheck, Library, Pencil, Plus, X } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { difficultyLabel } from "../../lib/utils";
 import type { Chapter, HydratedQuestion, MisconceptionTag, Option, Subject } from "../../lib/types";
@@ -27,6 +27,14 @@ export default function QuestionBank() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<HydratedQuestion | null>(null);
+
+  /* Success confirmation for question saves — auto-dismisses. */
+  const [notice, setNotice] = useState<{ text: string; action: "created" | "updated" | "deleted" } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
 
   /* Subjects on mount */
   useEffect(() => {
@@ -252,8 +260,44 @@ export default function QuestionBank() {
         subjects={subjects}
         defaultSubjectId={subjectId}
         defaultChapterId={chapterId}
-        onSaved={loadQuestions}
+        onSaved={(result) => {
+          // Refresh so the new/updated question appears immediately,
+          // then confirm visibly.
+          loadQuestions();
+          setNotice(result);
+        }}
       />
+
+      {/* Save confirmation toast */}
+      {notice && (
+        <div className="fixed bottom-5 right-5 z-40 max-w-sm animate-rise">
+          <div className="flex items-start gap-2.5 rounded-lg border border-pine-100 bg-pine-50 px-4 py-3 shadow-lifted" role="status">
+            <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-pine-600" />
+            <p className="text-[13px] leading-snug text-pine-700">
+              {notice.action === "created" && (
+                <>
+                  Question saved —{" "}
+                  <span className="font-semibold">
+                    {notice.text.length > 48 ? `${notice.text.slice(0, 47)}…` : notice.text}
+                  </span>{" "}
+                  now appears in the bank.
+                </>
+              )}
+              {notice.action === "updated" && (
+                <>Question updated — your changes are live in the bank.</>
+              )}
+              {notice.action === "deleted" && <>Question deleted from the bank.</>}
+            </p>
+            <button
+              onClick={() => setNotice(null)}
+              className="ml-1 shrink-0 rounded p-0.5 text-pine-700 opacity-60 transition-opacity hover:opacity-100"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
