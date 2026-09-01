@@ -225,11 +225,11 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         className={cn(
-          "w-full rounded-lg border border-line bg-cream shadow-pop animate-rise",
+          "flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden rounded-lg border border-line bg-cream shadow-pop animate-rise",
           width
         )}
       >
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3.5">
           <h2 className="font-display text-[16.5px] font-semibold text-ink-900">{title}</h2>
           <button
             onClick={onClose}
@@ -239,7 +239,9 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        {/* Tall forms (like the question editor) scroll here instead of
+            running the footer — and its save button — off the screen. */}
+        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
       </div>
     </div>
   );
