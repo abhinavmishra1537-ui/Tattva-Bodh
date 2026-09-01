@@ -31,7 +31,7 @@ export interface QuestionEditorProps {
   /** Chapter the bank is currently filtered to — used as the default. */
   defaultSubjectId: string;
   defaultChapterId: string;
-  onSaved: () => void;
+  onSaved: (result: { text: string; action: "created" | "updated" | "deleted" }) => void;
 }
 
 export default function QuestionEditor({
@@ -62,6 +62,7 @@ export default function QuestionEditor({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setShowErrors(false);
     setConfirmDelete(false);
     if (question) {
       setQuestionText(question.question_text);
@@ -157,27 +158,48 @@ export default function QuestionEditor({
       )
     );
 
-  const validate = (): string | null => {
-    if (!questionText.trim()) return "Write the question text.";
-    if (chapterChoice === NEW_CHAPTER && !newChapterName.trim())
-      return "Name the new chapter, or pick an existing one.";
-    if (!chapterChoice) return "Choose a chapter.";
-    if (options.some((o) => !o.text.trim())) return "All four options need text.";
+  /* ---- Field-level validation, rendered next to each field ---- */
+  const [showErrors, setShowErrors] = useState(false);
+
+  const fieldErrors = useMemo(() => {
+    const optionErrors: (string | null)[] = [null, null, null, null];
+    let question: string | null = null;
+    let chapter: string | null = null;
+    let correct: string | null = null;
+
+    if (!questionText.trim()) question = "Write the question text.";
+    if (!chapterChoice) chapter = "Choose a chapter.";
+    else if (chapterChoice === NEW_CHAPTER && !newChapterName.trim())
+      chapter = "Name the new chapter.";
+
+    options.forEach((o, i) => {
+      if (!o.text.trim()) {
+        optionErrors[i] = "This option needs text.";
+      } else if (!o.isCorrect) {
+        if (o.tagChoice === NO_TAG)
+          optionErrors[i] = "Pick or create a misconception tag for this wrong answer.";
+        else if (o.tagChoice === NEW_TAG && !o.newTagLabel.trim())
+          optionErrors[i] = "Name the new tag.";
+      }
+    });
+
     const correctCount = options.filter((o) => o.isCorrect).length;
-    if (correctCount !== 1) return "Mark exactly one option as the correct answer.";
-    for (const o of options) {
-      if (!o.isCorrect && o.tagChoice === NEW_TAG && !o.newTagLabel.trim())
-        return "Name each new misconception tag, or pick an existing one.";
-    }
-    return null;
-  };
+    if (correctCount === 0) correct = "Mark one option as the correct answer.";
+    else if (correctCount > 1)
+      correct = `Only one option can be correct — ${correctCount} are marked right now.`;
+
+    return { question, chapter, correct, optionErrors };
+  }, [questionText, chapterChoice, newChapterName, options]);
+
+  const hasErrors =
+    !!fieldErrors.question ||
+    !!fieldErrors.chapter ||
+    !!fieldErrors.correct ||
+    fieldErrors.optionErrors.some(Boolean);
 
   const save = async () => {
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
+    setShowErrors(true); // reveal field-level errors on the first attempt
+    if (hasErrors) return;
     setError(null);
     setBusy(true);
     try {
@@ -277,7 +299,7 @@ export default function QuestionEditor({
         }
       }
 
-      onSaved();
+      onSaved({ text: questionText.trim(), action: isEdit ? "updated" : "created" });
       onClose();
     } catch (err) {
       console.error("[Tattva Bodh] question save failed:", err);
@@ -296,7 +318,7 @@ export default function QuestionEditor({
       if (oErr) console.error("[Tattva Bodh] option cleanup failed:", oErr);
       const { error: qErr } = await supabase.from("questions").delete().eq("id", question.id);
       if (qErr) throw qErr;
-      onSaved();
+      onSaved({ text: question.question_text, action: "deleted" });
       onClose();
     } catch (err) {
       console.error("[Tattva Bodh] question delete failed:", err);
@@ -335,15 +357,22 @@ export default function QuestionEditor({
             </Select>
           </Field>
           <Field label="Chapter">
-            <Select value={chapterChoice} onChange={(e) => setChapterChoice(e.target.value)}>
-              <option value="">Choose a chapter…</option>
-              {chapters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-              <option value={NEW_CHAPTER}>+ Create a new chapter…</option>
-            </Select>
+            <>
+              <Select value={chapterChoice} onChange={(e) => setChapterChoice(e.target.value)}>
+                <option value="">Choose a chapter…</option>
+                {chapters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+                <option value={NEW_CHAPTER}>+ Create a new chapter…</option>
+              </Select>
+              {showErrors && fieldErrors.chapter && (
+                <span className="mt-1.5 block text-[12px] font-medium text-alert-600">
+                  {fieldErrors.chapter}
+                </span>
+              )}
+            </>
           </Field>
         </div>
 
@@ -358,12 +387,19 @@ export default function QuestionEditor({
         )}
 
         <Field label="Question">
-          <Textarea
-            value={questionText}
-            onChange={(e) => setQuestionText(e.target.value)}
-            placeholder="Write the question exactly as a student should read it…"
-            className="min-h-[90px]"
-          />
+          <>
+            <Textarea
+              value={questionText}
+              onChange={(e) => setQuestionText(e.target.value)}
+              placeholder="Write the question exactly as a student should read it…"
+              className="min-h-[90px]"
+            />
+            {showErrors && fieldErrors.question && (
+              <span className="mt-1.5 block text-[12px] font-medium text-alert-600">
+                {fieldErrors.question}
+              </span>
+            )}
+          </>
         </Field>
 
         <Field label="Difficulty">
@@ -394,6 +430,11 @@ export default function QuestionEditor({
             Mark exactly one option correct. Each wrong option should carry the misconception it
             reveals — that tagging is what makes diagnosis deterministic.
           </p>
+          {showErrors && fieldErrors.correct && (
+            <p className="mb-3 flex items-center gap-1.5 text-[12px] font-medium text-alert-600">
+              <CircleAlert className="h-3.5 w-3.5" /> {fieldErrors.correct}
+            </p>
+          )}
           <div className="space-y-3">
             {options.map((o, i) => (
               <div
@@ -426,36 +467,43 @@ export default function QuestionEditor({
                         Correct answer — no misconception tag is stored for this option.
                       </p>
                     ) : (
-                      <div className="space-y-2">
-                        <Select
-                          value={o.tagChoice}
-                          onChange={(e) => setOption(i, { tagChoice: e.target.value })}
-                          className="text-[13px]"
-                        >
-                          <option value={NO_TAG}>No misconception tag</option>
-                          {tags.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.tag_code} · {t.label}
-                            </option>
-                          ))}
-                          <option value={NEW_TAG}>+ Create a new tag…</option>
-                        </Select>
-                        {o.tagChoice === NEW_TAG && (
-                          <div>
-                            <Input
-                              value={o.newTagLabel}
-                              onChange={(e) => setOption(i, { newTagLabel: e.target.value })}
-                              placeholder="e.g. Confuses area with perimeter"
-                              className="text-[13px]"
-                            />
-                            {o.newTagLabel.trim() && chapterName && (
-                              <p className="mt-1.5 font-mono text-[11px] text-ink-400">
-                                tag_code → {slugifyTagCode(chapterName, o.newTagLabel)}
-                              </p>
-                            )}
-                          </div>
+                      <>
+                        <div className="space-y-2">
+                          <Select
+                            value={o.tagChoice}
+                            onChange={(e) => setOption(i, { tagChoice: e.target.value })}
+                            className="text-[13px]"
+                          >
+                            <option value={NO_TAG}>No misconception tag</option>
+                            {tags.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.tag_code} · {t.label}
+                              </option>
+                            ))}
+                            <option value={NEW_TAG}>+ Create a new tag…</option>
+                          </Select>
+                          {o.tagChoice === NEW_TAG && (
+                            <div>
+                              <Input
+                                value={o.newTagLabel}
+                                onChange={(e) => setOption(i, { newTagLabel: e.target.value })}
+                                placeholder="e.g. Confuses area with perimeter"
+                                className="text-[13px]"
+                              />
+                              {o.newTagLabel.trim() && chapterName && (
+                                <p className="mt-1.5 font-mono text-[11px] text-ink-400">
+                                  tag_code → {slugifyTagCode(chapterName, o.newTagLabel)}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {showErrors && fieldErrors.optionErrors[i] && (
+                          <p className="text-[12px] font-medium text-alert-600">
+                            {fieldErrors.optionErrors[i]}
+                          </p>
                         )}
-                      </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -487,7 +535,9 @@ export default function QuestionEditor({
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-2 border-t border-line pt-4">
+        {/* Sticky footer — the save action is always visible, even when the
+            form scrolls. */}
+        <div className="sticky bottom-0 -mx-5 -mb-4 flex items-center justify-between gap-2 border-t border-line bg-cream px-5 py-3.5 shadow-[0_-10px_24px_-18px_rgba(23,28,51,0.4)]">
           {isEdit && !confirmDelete ? (
             <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} className="text-alert-600 hover:bg-alert-50">
               <Trash2 className="h-3.5 w-3.5" /> Delete
@@ -496,12 +546,12 @@ export default function QuestionEditor({
             <span />
           )}
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
               Cancel
             </Button>
             <Button variant="accent" onClick={save} disabled={busy}>
               {busy ? <Spinner className="border-ink-400 border-t-cream" /> : <Save className="h-4 w-4" />}
-              {isEdit ? "Save changes" : "Create question"}
+              {busy ? "Saving…" : isEdit ? "Update question" : "Save question"}
             </Button>
           </div>
         </div>
